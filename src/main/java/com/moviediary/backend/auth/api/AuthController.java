@@ -3,6 +3,7 @@ package com.moviediary.backend.auth.api;
 import com.moviediary.backend.security.JwtTokenProvider;
 import com.moviediary.backend.user.domain.User;
 import com.moviediary.backend.user.dao.UserRepository;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
+@Tag(name = "Register/Login API", description = "JWT 기반 인증")
 public class AuthController {
 
     private final AuthenticationManager authenticationManager;
