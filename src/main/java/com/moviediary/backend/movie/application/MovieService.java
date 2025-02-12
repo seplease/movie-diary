@@ -89,7 +89,12 @@ public class MovieService {
         if (movieIds == null || movieIds.isEmpty()) {
             return updatePopularMoviesInCache(); // 캐시가 없으면 새로 조회
         }
-        return movieIds.stream().map(id -> (Long) id).collect(Collectors.toList());
+        return movieIds.stream().map(id -> {
+            if (id instanceof Integer) {
+                return ((Integer) id).longValue(); // Integer → Long 변환
+            }
+            return (Long) id;
+        }).collect(Collectors.toList());
     }
 
     /**
@@ -107,7 +112,7 @@ public class MovieService {
 
         // Redis에 저장
         for (MovieProjection movie : popularMovies) {
-            redisTemplate.opsForZSet().add(POPULAR_MOVIE_KEY, movie.getId(), movie.getPopularity());
+            redisTemplate.opsForZSet().add(POPULAR_MOVIE_KEY, movie.getId().longValue(), movie.getPopularity());
         }
 
         log.info("✅ Popular movies updated successfully!");
