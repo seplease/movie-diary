@@ -282,10 +282,8 @@ public class MovieService {
             return movieRepository.findTop10ProjectionByIdGreaterThanOrderByIdAsc(lastId);
         }
 
-        // 2️⃣ TMDB API 요청 URL 생성
+        // 2️⃣ TMDB API 요청 URL 생성 및 호출
         String url = buildTmdbSearchUrl(type, query);
-
-        // 3️⃣ TMDB API 호출
         ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
         Map<String, Object> data = response.getBody();
 
@@ -294,11 +292,10 @@ public class MovieService {
             return List.of();
         }
 
-        // 4️⃣ 결과 매핑 및 반환
-        List<Map<String, Object>> results = (List<Map<String, Object>>) data.get("results");
-        return results.stream()
+        // 3️⃣ 결과 매핑 및 반환 (최대 10개)
+        return ((List<Map<String, Object>>) data.get("results")).stream()
                 .map(this::mapToMovieProjection)
-                .limit(10) // 10개 제한
+                .limit(10)
                 .collect(Collectors.toList());
     }
 
@@ -306,15 +303,11 @@ public class MovieService {
      * ✅ TMDB 검색 URL 생성 (검색 유형에 따른 URL 매핑)
      */
     private String buildTmdbSearchUrl(String type, String query) {
-        StringBuilder url = new StringBuilder(TMDB_SEARCH_URL)
-                .append(type)
-                .append("?api_key=").append(tmdbApiKey)
-                .append("&query=").append(query)
-                .append("&include_adult=false")
-                .append("&language=en-US")
-                .append("&page=1");
+        List<String> validTypes = List.of("movie", "person", "keyword", "collection");
+        String searchType = validTypes.contains(type) ? type : "movie";
 
-        return url.toString();
+        return String.format("%s%s?api_key=%s&query=%s&include_adult=false&language=en-US&page=1",
+                TMDB_SEARCH_URL, searchType, tmdbApiKey, query);
     }
 
     /**
@@ -324,22 +317,22 @@ public class MovieService {
         return new MovieProjection() {
             @Override
             public Long getId() {
-                return data.containsKey("id") ? Long.parseLong(String.valueOf(data.get("id"))) : null;
+                return Optional.ofNullable(data.get("id")).map(String::valueOf).map(Long::parseLong).orElse(null);
             }
 
             @Override
             public String getTitle() {
-                return (String) data.getOrDefault("title", data.getOrDefault("name", "Unknown"));
+                return Optional.ofNullable((String) data.get("title")).orElse((String) data.getOrDefault("name", "Unknown"));
             }
 
             @Override
             public String getPosterUrl() {
-                return "https://image.tmdb.org/t/p/w500" + data.getOrDefault("poster_path", "");
+                return "https://image.tmdb.org/t/p/w500" + Optional.ofNullable((String) data.get("poster_path")).orElse("");
             }
 
             @Override
             public Double getPopularity() {
-                return ((Number) data.getOrDefault("popularity", 0)).doubleValue();
+                return Optional.ofNullable(data.get("popularity")).map(val -> ((Number) val).doubleValue()).orElse(0.0);
             }
         };
     }
