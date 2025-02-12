@@ -1,6 +1,7 @@
 package com.moviediary.backend.movie.application;
 
 import com.moviediary.backend.movie.dao.MovieRepository;
+import com.moviediary.backend.movie.dto.MovieProjection;
 import com.moviediary.backend.movie.domain.Movie;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -8,14 +9,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -27,101 +28,145 @@ public class MovieService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final RestTemplate restTemplate;
 
-    @PostConstruct
-    public void init() {
-        log.info("✅ RestTemplate Bean Injected Successfully");
-    }
-
     @Value("${tmdb.api.key}")
     private String tmdbApiKey;
 
+    private static final String POPULAR_MOVIE_KEY = "movie-popularity";
+    private static final String MOVIE_CACHE_KEY_PREFIX = "movies:lastId:";
+
+    @PostConstruct
+    public void init() {
+        log.info("✅ RestTemplate Bean Injected Successfully");
+        updatePopularMoviesInCache(); // 애플리케이션 시작 시 인기 영화 업데이트
+    }
+
     /**
-     * 영화 목록 조회 (인기 영화 + 일반 조회)
+     * 🎬 영화 목록 조회 (인기 영화 + 일반 조회)
      */
-    public List<Movie> getMovies(Long lastId) {
-        // 🔹 Redis에서 인기 영화 10개 가져오기
+    public List<MovieProjection> getMovies(Long lastId) {
+        // 1️⃣ Redis에서 인기 영화 가져오기
         List<Long> popularMovieIds = getTopPopularMovies();
-        List<Movie> popularMovies = movieRepository.findAllById(popularMovieIds);
+        List<MovieProjection> popularMovies = popularMovieIds.isEmpty() ? new ArrayList<>()
+                : movieRepository.findProjectionsByIdIn(popularMovieIds);
 
-        // 🔹 일반 조회 (캐싱된 데이터 확인)
-        String cacheKey = "movies:lastId:" + lastId;
-        List<Movie> cachedMovies = (List<Movie>) redisTemplate.opsForValue().get(cacheKey);
+        // 2️⃣ 일반 조회 (캐싱된 데이터 확인)
+        String cacheKey = MOVIE_CACHE_KEY_PREFIX + lastId;
+        List<MovieProjection> cachedMovies = (List<MovieProjection>) redisTemplate.opsForValue().get(cacheKey);
         if (cachedMovies != null) {
-            return cachedMovies;
+            return mergeMovieLists(popularMovies, cachedMovies);
         }
 
-        // 🔹 DB에서 추가 영화 조회
-        List<Movie> movies = movieRepository.findTop10ByIdGreaterThanOrderByIdAsc(lastId);
+        // 3️⃣ DB에서 추가 영화 조회
+        List<MovieProjection> movies = movieRepository.findTop10ProjectionByIdGreaterThanOrderByIdAsc(lastId);
         if (movies.isEmpty()) {
-            fetchAndSaveMoviesFromTMDB();
-            movies = movieRepository.findTop10ByIdGreaterThanOrderByIdAsc(lastId);
+            fetchAndSaveNewMovies();
+            movies = movieRepository.findTop10ProjectionByIdGreaterThanOrderByIdAsc(lastId);
         }
 
-        // 🔹 조회된 영화 캐싱 (1시간 유지)
+        // 4️⃣ 조회된 영화 캐싱 (1시간 유지)
         redisTemplate.opsForValue().set(cacheKey, movies, Duration.ofHours(1));
 
-        // 🔹 인기 영화 + 일반 영화 데이터 합쳐서 반환
+        // 5️⃣ 인기 영화 + 일반 영화 데이터 합쳐서 반환
         return mergeMovieLists(popularMovies, movies);
     }
 
     /**
-     * Redis Sorted Set에 영화 조회수 증가
+     * 📌 영화 조회 시 인기 점수 증가
      */
-    public void incrementMovieViewCount(Long movieId) {
-        redisTemplate.opsForZSet().incrementScore("movie-popularity", movieId, 1);
+    public void incrementMoviePopularity(Long movieId) {
+        redisTemplate.opsForZSet().incrementScore(POPULAR_MOVIE_KEY, movieId, 1);
     }
 
     /**
-     * Redis에서 인기 영화 목록 가져오기
+     * 🎬 Redis에서 인기 영화 목록 가져오기
      */
     public List<Long> getTopPopularMovies() {
-        return redisTemplate.opsForZSet().reverseRange("movie-popularity", 0, 9).stream()
-                .map(id -> (Long) id)
-                .collect(Collectors.toList());
+        Set<Object> movieIds = redisTemplate.opsForZSet().reverseRange(POPULAR_MOVIE_KEY, 0, 9);
+        if (movieIds == null || movieIds.isEmpty()) {
+            return updatePopularMoviesInCache(); // 캐시가 없으면 새로 조회
+        }
+        return movieIds.stream().map(id -> (Long) id).collect(Collectors.toList());
     }
 
     /**
-     * TMDB API에서 최신 영화 목록을 가져와 DB에 저장
+     * 🔥 매일 새벽 4시에 Redis 인기 영화 목록 갱신
      */
-    private void fetchAndSaveMoviesFromTMDB() {
+    @Scheduled(cron = "0 0 4 * * ?")
+    public List<Long> updatePopularMoviesInCache() {
+        log.info("🔥 Refreshing popular movies in Redis...");
+
+        // 기존 Redis 인기 영화 삭제
+        redisTemplate.delete(POPULAR_MOVIE_KEY);
+
+        // DB에서 인기 영화 10개 가져오기
+        List<MovieProjection> popularMovies = movieRepository.findTop10PopularMovies();
+
+        // Redis에 저장
+        for (MovieProjection movie : popularMovies) {
+            redisTemplate.opsForZSet().add(POPULAR_MOVIE_KEY, movie.getId(), movie.getPopularity());
+        }
+
+        log.info("✅ Popular movies updated successfully!");
+        return popularMovies.stream().map(MovieProjection::getId).collect(Collectors.toList());
+    }
+
+    /**
+     * 🔥 하루에 한 번 Redis 조회수를 감소시켜서 최근 조회된 영화가 더 높은 순위를 유지하도록 함
+     * ⏳ 매일 새벽 3시에 조회수 감소 (오래된 영화의 인기 감소)
+     */
+    @Scheduled(cron = "0 0 3 * * ?")
+    public void decayMoviePopularityScores() {
+        log.info("🔥 Decreasing movie view counts in Redis...");
+        Set<Object> movieIds = redisTemplate.opsForZSet().range(POPULAR_MOVIE_KEY, 0, -1);
+        if (movieIds != null) {
+            for (Object movieId : movieIds) {
+                redisTemplate.opsForZSet().incrementScore(POPULAR_MOVIE_KEY, movieId, -0.1);
+            }
+        }
+        log.info("✅ View counts decreased successfully!");
+    }
+
+    /**
+     * 🎬 TMDB API에서 최신 영화 목록 가져와 DB 저장 (중복 저장 방지)
+     */
+    private void fetchAndSaveNewMovies() {
         try {
+            log.info("🎬 Fetching movies from TMDB...");
             String url = "https://api.themoviedb.org/3/discover/movie?api_key=" + tmdbApiKey;
             ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
             List<Map<String, Object>> results = (List<Map<String, Object>>) response.getBody().get("results");
 
-            if (results != null && !results.isEmpty()) {
-                List<Movie> movies = results.stream()
-                        .map(this::mapToMovie)
-                        .collect(Collectors.toList());
-                movieRepository.saveAll(movies);
+            if (results == null || results.isEmpty()) {
+                log.warn("⚠️ TMDB에서 가져온 영화 데이터가 없음");
+                return;
             }
+
+            // 기존 저장된 영화 확인 후 새로운 영화만 저장
+            List<String> tmdbIds = results.stream()
+                    .map(data -> String.valueOf(data.get("id")))
+                    .collect(Collectors.toList());
+
+            Set<String> existingTmdbIds = new HashSet<>(movieRepository.findTmdbIdsByTmdbIdIn(tmdbIds));
+
+            List<Movie> newMovies = results.stream()
+                    .filter(data -> !existingTmdbIds.contains(String.valueOf(data.get("id"))))
+                    .map(this::mapToMovie)
+                    .collect(Collectors.toList());
+
+            if (!newMovies.isEmpty()) {
+                movieRepository.saveAll(newMovies);
+                log.info("✅ {}개의 새로운 영화가 DB에 추가됨", newMovies.size());
+            } else {
+                log.info("✨ 모든 영화가 이미 DB에 존재함 (새로 저장된 영화 없음)");
+            }
+
         } catch (Exception e) {
-            log.error("❌ Error fetching movies from TMDB: {}", e.getMessage());
+            log.error("❌ TMDB 영화 업데이트 중 오류 발생: {}", e.getMessage());
         }
     }
 
     /**
-     * TMDB API에서 인기 영화 목록 가져오기
-     */
-    private List<Movie> fetchPopularMoviesFromTMDB() {
-        try {
-            String url = "https://api.themoviedb.org/3/movie/popular?api_key=" + tmdbApiKey;
-            ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
-            List<Map<String, Object>> results = (List<Map<String, Object>>) response.getBody().get("results");
-
-            if (results != null && !results.isEmpty()) {
-                return results.stream()
-                        .map(this::mapToMovie)
-                        .collect(Collectors.toList());
-            }
-        } catch (Exception e) {
-            log.error("❌ Error fetching popular movies from TMDB: {}", e.getMessage());
-        }
-        return List.of();
-    }
-
-    /**
-     * TMDB API 응답을 Movie 객체로 변환
+     * 🔹 TMDB API 응답을 Movie 객체로 변환
      */
     private Movie mapToMovie(Map<String, Object> data) {
         try {
@@ -146,9 +191,9 @@ public class MovieService {
     }
 
     /**
-     * 인기 영화와 일반 영화 리스트를 합치는 메서드
+     * 🔹 인기 영화와 일반 영화 리스트 합치기
      */
-    private List<Movie> mergeMovieLists(List<Movie> popularMovies, List<Movie> normalMovies) {
+    private List<MovieProjection> mergeMovieLists(List<MovieProjection> popularMovies, List<MovieProjection> normalMovies) {
         return Stream.concat(popularMovies.stream(), normalMovies.stream())
                 .distinct()
                 .limit(10)

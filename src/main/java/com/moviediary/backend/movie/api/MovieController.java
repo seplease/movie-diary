@@ -2,6 +2,7 @@ package com.moviediary.backend.movie.api;
 
 import com.moviediary.backend.movie.application.MovieService;
 import com.moviediary.backend.movie.domain.Movie;
+import com.moviediary.backend.movie.dto.MovieProjection;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -30,7 +31,7 @@ public class MovieController {
             @ApiResponse(responseCode = "500", description = "서버 오류")
     })
     @GetMapping
-    public ResponseEntity<List<Movie>> getMovies(
+    public ResponseEntity<List<MovieProjection>> getMovies(
             @Parameter(description = "마지막으로 조회된 ID (기본값: 0)")
             @RequestParam(required = false, defaultValue = "0") Long lastId) {
         return ResponseEntity.ok(movieService.getMovies(lastId));
