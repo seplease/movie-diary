@@ -57,4 +57,19 @@ public class MovieController {
         Optional<Movie> movieDetails = movieService.getMovieDetails(movieId);
         return movieDetails.map(ResponseEntity::ok).orElseGet(() -> ResponseEntity.notFound().build());
     }
+
+    @Operation(summary = "영화 검색 API", description = "TMDB API 및 DB 기반 검색")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "검색 성공"),
+            @ApiResponse(responseCode = "400", description = "잘못된 요청"),
+            @ApiResponse(responseCode = "500", description = "서버 오류")
+    })
+    @GetMapping("/search")
+    public ResponseEntity<List<MovieProjection>> searchMovies(
+            @Parameter(description = "검색어", example = "Inception") @RequestParam(required = false) String query,
+            @Parameter(description = "검색 유형 (movie, person, keyword, collection)", example = "movie")
+            @RequestParam(defaultValue = "movie") String type,
+            @Parameter(description = "마지막 ID (No-Offset 페이징)", example = "0") @RequestParam(defaultValue = "0") Long lastId) {
+        return ResponseEntity.ok(movieService.searchMovies(query, type, lastId));
+    }
 }

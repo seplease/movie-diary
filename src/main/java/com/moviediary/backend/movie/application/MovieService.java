@@ -31,6 +31,8 @@ public class MovieService {
     @Value("${tmdb.api.key}")
     private String tmdbApiKey;
 
+    private static final String TMDB_SEARCH_URL = "https://api.themoviedb.org/3/search/";
+
     private static final String POPULAR_MOVIE_KEY = "movie-popularity";
     private static final String MOVIE_CACHE_KEY_PREFIX = "movies:lastId:";
 
@@ -269,5 +271,76 @@ public class MovieService {
             log.error("❌ 영화 상세 정보를 가져오는 중 오류 발생: {}", e.getMessage());
             return Optional.empty();
         }
+    }
+
+    /**
+     * 🎬 TMDB API 및 DB 기반 검색 (No-Offset 적용)
+     */
+    public List<MovieProjection> searchMovies(String query, String type, Long lastId) {
+        // 1️⃣ Query가 없으면 로컬 DB에서 영화 검색 (No-Offset 방식)
+        if (query == null || query.trim().isEmpty()) {
+            return movieRepository.findTop10ProjectionByIdGreaterThanOrderByIdAsc(lastId);
+        }
+
+        // 2️⃣ TMDB API 요청 URL 생성
+        String url = buildTmdbSearchUrl(type, query);
+
+        // 3️⃣ TMDB API 호출
+        ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
+        Map<String, Object> data = response.getBody();
+
+        if (data == null || !data.containsKey("results")) {
+            log.warn("⚠️ TMDB API에서 검색 결과를 가져오지 못함.");
+            return List.of();
+        }
+
+        // 4️⃣ 결과 매핑 및 반환
+        List<Map<String, Object>> results = (List<Map<String, Object>>) data.get("results");
+        return results.stream()
+                .map(this::mapToMovieProjection)
+                .limit(10) // 10개 제한
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * ✅ TMDB 검색 URL 생성 (검색 유형에 따른 URL 매핑)
+     */
+    private String buildTmdbSearchUrl(String type, String query) {
+        StringBuilder url = new StringBuilder(TMDB_SEARCH_URL)
+                .append(type)
+                .append("?api_key=").append(tmdbApiKey)
+                .append("&query=").append(query)
+                .append("&include_adult=false")
+                .append("&language=en-US")
+                .append("&page=1");
+
+        return url.toString();
+    }
+
+    /**
+     * 🎯 TMDB API 응답을 MovieProjection으로 변환
+     */
+    private MovieProjection mapToMovieProjection(Map<String, Object> data) {
+        return new MovieProjection() {
+            @Override
+            public Long getId() {
+                return data.containsKey("id") ? Long.parseLong(String.valueOf(data.get("id"))) : null;
+            }
+
+            @Override
+            public String getTitle() {
+                return (String) data.getOrDefault("title", data.getOrDefault("name", "Unknown"));
+            }
+
+            @Override
+            public String getPosterUrl() {
+                return "https://image.tmdb.org/t/p/w500" + data.getOrDefault("poster_path", "");
+            }
+
+            @Override
+            public Double getPopularity() {
+                return ((Number) data.getOrDefault("popularity", 0)).doubleValue();
+            }
+        };
     }
 }
