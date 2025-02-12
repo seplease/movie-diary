@@ -186,6 +186,19 @@ public class MovieService {
             String releaseDateStr = (String) data.get("release_date");
             LocalDate releaseDate = (releaseDateStr != null && !releaseDateStr.isEmpty()) ? LocalDate.parse(releaseDateStr) : null;
 
+            // ✅ 예고편 URL 가져오기
+            String trailerUrl = "";
+            Map<String, Object> videos = (Map<String, Object>) data.get("videos");
+            if (videos != null) {
+                var results = (List<Map<String, Object>>) videos.get("results");
+                for (Map<String, Object> video : results) {
+                    if ("Trailer".equals(video.get("type")) && "YouTube".equals(video.get("site"))) {
+                        trailerUrl = "https://www.youtube.com/watch?v=" + video.get("key");
+                        break;
+                    }
+                }
+            }
+
             return new Movie(
                     null,
                     String.valueOf(data.get("id")),
@@ -198,6 +211,7 @@ public class MovieService {
                     "https://image.tmdb.org/t/p/w500" + data.getOrDefault("backdrop_path", ""),
                     ((Number) data.getOrDefault("popularity", 0)).doubleValue(),
                     ((Number) data.getOrDefault("vote_count", 0)).intValue(),
+                    trailerUrl,  // ✅ 예고편 URL 추가
                     LocalDateTime.now()
             );
         } catch (Exception e) {
@@ -236,10 +250,11 @@ public class MovieService {
                 return Optional.empty();
             }
 
+            // ✅ 예고편 URL 가져오기
             String trailerUrl = "";
             Map<String, Object> videos = (Map<String, Object>) data.get("videos");
             if (videos != null) {
-                var results = (Iterable<Map<String, Object>>) videos.get("results");
+                var results = (List<Map<String, Object>>) videos.get("results");
                 for (Map<String, Object> video : results) {
                     if ("Trailer".equals(video.get("type")) && "YouTube".equals(video.get("site"))) {
                         trailerUrl = "https://www.youtube.com/watch?v=" + video.get("key");
@@ -248,6 +263,7 @@ public class MovieService {
                 }
             }
 
+            // ✅ `trailerUrl`을 포함하여 `Movie` 객체 생성
             Movie fetchedMovie = new Movie(
                     null,
                     String.valueOf(data.get("id")),
@@ -260,11 +276,9 @@ public class MovieService {
                     "https://image.tmdb.org/t/p/w500" + data.getOrDefault("backdrop_path", ""),
                     ((Number) data.getOrDefault("popularity", 0)).doubleValue(),
                     ((Number) data.getOrDefault("vote_count", 0)).intValue(),
-                    null
+                    trailerUrl,  // ✅ 예고편 URL 추가
+                    LocalDateTime.now()
             );
-
-            // 예고편 URL 추가
-            fetchedMovie.setOverview(fetchedMovie.getOverview() + "\nTrailer: " + trailerUrl);
 
             return Optional.of(fetchedMovie);
         } catch (Exception e) {

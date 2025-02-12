@@ -43,7 +43,8 @@ public class Movie {
 
     private Integer voteCount;
 
+    private String trailerUrl;  // ✅ 예고편 URL 추가
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 }
-
