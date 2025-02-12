@@ -12,15 +12,15 @@ import java.util.List;
 public interface MovieRepository extends JpaRepository<Movie, Long> {
 
     // No-Offset 방식으로 영화 10개 조회 (Projection 사용)
-    @Query("SELECT m.id AS id, m.title AS title, m.popularity AS popularity FROM Movie m WHERE m.id > :lastId ORDER BY m.id ASC LIMIT 10")
+    @Query("SELECT m.id AS id, m.title AS title, m.posterUrl AS posterUrl, m.popularity AS popularity FROM Movie m WHERE m.id > :lastId ORDER BY m.id ASC LIMIT 10")
     List<MovieProjection> findTop10ProjectionByIdGreaterThanOrderByIdAsc(Long lastId);
 
     // 인기 영화 조회 (Projection 사용)
-    @Query("SELECT m.id AS id, m.title AS title, m.popularity AS popularity FROM Movie m ORDER BY m.popularity DESC LIMIT 10")
+    @Query("SELECT m.id AS id, m.title AS title, m.posterUrl, m.popularity AS popularity FROM Movie m ORDER BY m.popularity DESC LIMIT 10")
     List<MovieProjection> findTop10PopularMovies();
 
     // ✅ 특정 ID 리스트에 해당하는 MovieProjection 조회
-    @Query("SELECT m.id AS id, m.title AS title, m.popularity AS popularity FROM Movie m WHERE m.id IN :ids")
+    @Query("SELECT m.id AS id, m.title AS title, m.posterUrl, m.popularity AS popularity FROM Movie m WHERE m.id IN :ids")
     List<MovieProjection> findProjectionsByIdIn(List<Long> ids);
 
     // ✅ 특정 ID 리스트에 해당하는 Movie 엔티티 조회
