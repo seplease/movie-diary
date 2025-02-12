@@ -61,6 +61,10 @@ public class MovieService {
         if (movies.isEmpty()) {
             fetchAndSaveNewMovies();
             movies = movieRepository.findTop10ProjectionByIdGreaterThanOrderByIdAsc(lastId);
+
+            if (movies.isEmpty()) {
+                log.warn("⚠️ TMDB API에서 새로운 영화를 가져왔지만 DB에 저장되지 않았습니다.");
+            }
         }
 
         // 4️⃣ 조회된 영화 캐싱 (1시간 유지)
@@ -155,7 +159,9 @@ public class MovieService {
 
             if (!newMovies.isEmpty()) {
                 movieRepository.saveAll(newMovies);
-                log.info("✅ {}개의 새로운 영화가 DB에 추가됨", newMovies.size());
+
+                List<String> savedTmdbIds = movieRepository.findTmdbIdsByTmdbIdIn(tmdbIds);
+                log.info("✅ {}개의 새로운 영화가 DB에 추가됨 (현재 저장된 TMDB ID 개수: {})", newMovies.size(), savedTmdbIds.size());
             } else {
                 log.info("✨ 모든 영화가 이미 DB에 존재함 (새로 저장된 영화 없음)");
             }
@@ -170,16 +176,19 @@ public class MovieService {
      */
     private Movie mapToMovie(Map<String, Object> data) {
         try {
+            String releaseDateStr = (String) data.get("release_date");
+            LocalDate releaseDate = (releaseDateStr != null && !releaseDateStr.isEmpty()) ? LocalDate.parse(releaseDateStr) : null;
+
             return new Movie(
                     null,
                     String.valueOf(data.get("id")),
                     (String) data.get("title"),
-                    data.get("release_date") != null ? LocalDate.parse((String) data.get("release_date")) : null,
+                    releaseDate,
                     ((Number) data.getOrDefault("vote_average", 0)).doubleValue(),
-                    data.get("genre_ids").toString(),
-                    (String) data.get("overview"),
-                    "https://image.tmdb.org/t/p/w500" + data.get("poster_path"),
-                    "https://image.tmdb.org/t/p/w500" + data.get("backdrop_path"),
+                    data.get("genre_ids") != null ? data.get("genre_ids").toString() : "[]",
+                    (String) data.getOrDefault("overview", ""),
+                    "https://image.tmdb.org/t/p/w500" + data.getOrDefault("poster_path", ""),
+                    "https://image.tmdb.org/t/p/w500" + data.getOrDefault("backdrop_path", ""),
                     ((Number) data.getOrDefault("popularity", 0)).doubleValue(),
                     ((Number) data.getOrDefault("vote_count", 0)).intValue(),
                     LocalDateTime.now()
