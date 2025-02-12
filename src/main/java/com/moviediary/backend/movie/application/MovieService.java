@@ -213,4 +213,61 @@ public class MovieService {
                 .limit(10)
                 .collect(Collectors.toList());
     }
+
+    /*
+    영화 상세 정보
+     */
+    public Optional<Movie> getMovieDetails(Long movieId) {
+        Optional<Movie> movie = movieRepository.findById(movieId);
+        if (movie.isPresent()) {
+            return movie;
+        }
+
+        // TMDB API에서 상세 정보 가져오기
+        try {
+            String url = "https://api.themoviedb.org/3/movie/" + movieId + "?api_key=" + tmdbApiKey + "&append_to_response=videos";
+            ResponseEntity<Map> response = restTemplate.getForEntity(url, Map.class);
+            Map<String, Object> data = response.getBody();
+
+            if (data == null || data.isEmpty()) {
+                log.warn("⚠️ TMDB에서 영화 정보를 가져오지 못함 (ID: {})", movieId);
+                return Optional.empty();
+            }
+
+            String trailerUrl = "";
+            Map<String, Object> videos = (Map<String, Object>) data.get("videos");
+            if (videos != null) {
+                var results = (Iterable<Map<String, Object>>) videos.get("results");
+                for (Map<String, Object> video : results) {
+                    if ("Trailer".equals(video.get("type")) && "YouTube".equals(video.get("site"))) {
+                        trailerUrl = "https://www.youtube.com/watch?v=" + video.get("key");
+                        break;
+                    }
+                }
+            }
+
+            Movie fetchedMovie = new Movie(
+                    null,
+                    String.valueOf(data.get("id")),
+                    (String) data.get("title"),
+                    null,
+                    ((Number) data.getOrDefault("vote_average", 0)).doubleValue(),
+                    data.get("genres") != null ? data.get("genres").toString() : "[]",
+                    (String) data.getOrDefault("overview", ""),
+                    "https://image.tmdb.org/t/p/w500" + data.getOrDefault("poster_path", ""),
+                    "https://image.tmdb.org/t/p/w500" + data.getOrDefault("backdrop_path", ""),
+                    ((Number) data.getOrDefault("popularity", 0)).doubleValue(),
+                    ((Number) data.getOrDefault("vote_count", 0)).intValue(),
+                    null
+            );
+
+            // 예고편 URL 추가
+            fetchedMovie.setOverview(fetchedMovie.getOverview() + "\nTrailer: " + trailerUrl);
+
+            return Optional.of(fetchedMovie);
+        } catch (Exception e) {
+            log.error("❌ 영화 상세 정보를 가져오는 중 오류 발생: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
 }
